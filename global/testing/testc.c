@@ -13,8 +13,106 @@
 #include "macdecls.h"
 #include "mp3.h"
 
-#define N 100            /* dimension of matrices */
+/* Override definitions in mp3.h to call MPI_Init_thread */
+    static inline int _MPI_INIT_THREAD(int *argc, char ***argv) {
+        int status;
+        int provided;
+        status = MPI_Init_thread(argc, argv, MPI_THREAD_MULTIPLE, &provided);
+        return status;
+    }
+#       define _MP_INIT(argc,argv)   _MPI_INIT_THREAD(&(argc),&(argv))
 
+
+#define N 2000            /* dimension of matrices */
+
+static inline uint64_t rdtsc_light(void )
+{
+    uint64_t x;
+    __asm__ __volatile__("rdtscp;" /* rdtscp don't jump over earlier instructions */
+                         "shl $32, %%rdx;"
+                         "or %%rdx, %%rax" :
+                         "=a"(x) :
+                         :    
+                         "%rcx", "%rdx", "memory");
+    return x;
+}
+
+int ranges[] = {
+#include "ranges0"
+#include "ranges1"
+#include "ranges2"
+#include "ranges3"
+#include "ranges4"
+#include "ranges5"
+#include "ranges6"
+#include "ranges7"
+#include "ranges8"
+#include "ranges9"
+
+#include "ranges10"
+#include "ranges11"
+#include "ranges12"
+#include "ranges13"
+#include "ranges14"
+#include "ranges15"
+#include "ranges16"
+#include "ranges17"
+#include "ranges18"
+#include "ranges19"
+
+#include "ranges20"
+#include "ranges21"
+#include "ranges22"
+#include "ranges23"
+#include "ranges24"
+#include "ranges25"
+#include "ranges26"
+#include "ranges27"
+#include "ranges28"
+#include "ranges29"
+
+#include "ranges30"
+#include "ranges31"
+#include "ranges32"
+#include "ranges33"
+#include "ranges34"
+#include "ranges35"
+#include "ranges36"
+#include "ranges37"
+#include "ranges38"
+#include "ranges39"
+
+#include "ranges40"
+#include "ranges41"
+#include "ranges42"
+#include "ranges43"
+#include "ranges44"
+#include "ranges45"
+#include "ranges46"
+#include "ranges47"
+#include "ranges48"
+#include "ranges49"
+
+#include "ranges50"
+#include "ranges51"
+#include "ranges52"
+#include "ranges53"
+#include "ranges54"
+#include "ranges55"
+#include "ranges56"
+#include "ranges57"
+#include "ranges58"
+#include "ranges59"
+
+#include "ranges60"
+#include "ranges61"
+#include "ranges62"
+#include "ranges63"
+};
+
+int lranges[] = {
+#include "lranges"
+};
 
 void do_work()
 {
@@ -28,6 +126,9 @@ int lo[2], hi[2];
 
 /* Note: on all current platforms DoublePrecision == double */
 double buf[N], err, alpha, beta;
+
+long start, end;
+ int j, column;
 
      if(me==0)printf("Creating matrix A\n");
      g_a = NGA_Create(type, 2, dims, "A", NULL);
@@ -52,7 +153,7 @@ double buf[N], err, alpha, beta;
          NGA_Put(g_a, lo, hi, buf, &n);
      }
 
-
+#if 0
      if(me==0)printf("Symmetrizing matrix A\n");
      GA_Symmetrize(g_a);   /* symmetrize the matrix A = 0.5*(A+A') */
    
@@ -76,6 +177,7 @@ double buf[N], err, alpha, beta;
      row = n/2;
      lo[0]=hi[0]=row;
      lo[1]=0; hi[1]=n-1;
+	 //printf("NGA_Acc(%d-%d,%d-%d)\n", lo[0], hi[0], lo[1], hi[1]);
      NGA_Acc(g_a, lo, hi, buf, &ONE, &alpha );
      GA_Sync();
 
@@ -87,7 +189,40 @@ double buf[N], err, alpha, beta;
         printf("OK\n\n");
 
      }
+#endif
      
+	 /* Communication pattern of mo_trp_trf23K when the w2 data-set */
+	 int off = 0;
+	 for (i = 0; i < me; i++) {
+		 off += lranges[i];
+	 }
+	 off *= 4;
+	 if (me == 1 || me == 63) printf("[%d] off=%d\n", me, off);
+
+	 int count = 0;
+	 armci_init_async_thread_();
+	 GA_Sync();
+	 //MPI_Pcontrol(1, "ga_acc");
+	 start = rdtsc_light();
+
+	 for (i = 0; i < lranges[me]; i++) {
+			 alpha = 1.0;
+			 lo[0] = ranges[off + i * 4];
+			 hi[0] = ranges[off + i * 4 + 1];
+			 lo[1] = ranges[off + i * 4 + 2];
+			 hi[1] = ranges[off + i * 4 + 3];
+			 //if (me == 1 || me == 63) printf("NGA_Acc(%d-%d,%d-%d)\n", lo[0], hi[0], lo[1], hi[1]);
+			 NGA_Acc(g_a, lo, hi, buf, &ONE, &alpha );
+			 //GA_Sync();
+			 count++;
+	 }
+
+	 //MPI_Pcontrol(-1, "ga_acc");
+	end = rdtsc_light();
+	armci_finalize_async_thread_();
+	GA_Sync();
+	printf("ga_acc: %.0f, count: %d\n", (double)(end - start) / count, count);
+
      GA_Destroy(g_a);
      GA_Destroy(g_b);
 }
@@ -101,7 +236,7 @@ char **argv;
 int heap=20000, stack=20000;
 int me, nproc;
 
-    MP_INIT(argc,argv);
+    _MP_INIT(argc,argv);
 
     GA_INIT(argc,argv);                            /* initialize GA */
     me=GA_Nodeid(); 
